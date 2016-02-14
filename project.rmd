@@ -1,0 +1,143 @@
+---
+title: "exercise project"
+author: "Guillaume Bourgault"
+date: "Sunday, February 14, 2016"
+output: html_document
+---
+
+# Selection of the predictors
+The amount of data in this dataset might look overwhelming, but most of it cannot be used.  The test cases have most of their predictors empty.  The only predictors available are:
+
+* accel_arm (x, y and z)
+* accel_belt (x, y and z)
+* gyros_arm (x, y and z)
+* gyros_belt (x, y and z)
+* magnet_arm (x, y and z)
+* magnet_belt (x, y and z)
+* pitch, roll and yaw of arm, bult and dumbbell
+
+Let's review the description of each of the mistakes:
+
+* throwing the elbows to the front
+* lifting the dumbbell only halfway
+* lowering the dumbbell only halfway
+* throwing the hips to the front
+
+The figure below shows the value of the acceleration of the belt for each mistake and each individual in the z direction (forward and backward movement).  The hip do not move a lot in this direction, except during the deliberately throwing hips to the front mistake.  Selecting this predictor in a classification algorithm would discriminate this mistake from all the other ones.  
+
+```{r}
+library(dplyr)
+library(ggplot2)
+library(caret)
+rm(list = ls())
+if (!file.exists('pml-training.csv')) {
+    fileUrl <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv'
+    download.file(fileUrl, destfile = 'pml-training.csv', method = 'auto')
+}
+if (!file.exists('pml-testing.csv')) {
+  fileUrl <- 'https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv'
+  download.file(fileUrl, destfile = 'pml-testing.csv', method = 'auto')
+}
+training <- read.table('pml-training.csv', header = TRUE, sep = ',')
+testing <- read.table('pml-testing.csv', header = TRUE, sep = ',')
+change_label <- c('correct', 'elbow_front', 'lift_half', 'lower_half', 'hip_front')
+names(change_label) <- c('A', 'B', 'C', 'D', 'E')
+training <- mutate(training, classe = change_label[classe])
+training[1,'X'] <- 1
+for (i in 2:nrow(training)) {
+  if (training[i-1, 'user_name'] != training[i, 'user_name'] | training[i-1, 'classe'] != training[i, 'classe']) {
+    training[i, 'X'] <- 1
+  } else {training[i, 'X'] <- training[i-1, 'X'] + 1}
+}
+pred = 'accel_belt_z'
+ggplot(training, aes_string(x='X', y=pred)) + geom_point() + facet_grid(user_name ~ classe)
+```
+
+The plot also show what appears to be a labeling mistake: the participant Eurico looks like he performed the hip mistake during the lowering the dumbbell only halfway mistake.  The classe variable has been relabeled to correct this mistake.  
+The roll_arm predictor can also help to discriminate between the lifting or lowering halfway mistakes and the other mistakes.  In these cases, the amplitude of the roll is smaller.  
+
+The roll_dumbbell predictor range is different in the two halfway mistakes.  The amplitude is similar, but participants Carlitos and Charles show clear indication that they kept the motion in the lower or upper half of the range.   
+
+# Participants
+
+The same mistake executed by different participant gives wildly different patterns.  It would be questionable to use data acquired on one participant as predictors to the behavior of another participant.  It was therefore decided to fit a different model on each participant and to use participant-specific models to predict the mistake on the test set.  
+
+# Note on data availability
+
+The data supplied for the project is not the most adequate to make predictions.  The training set contains predictors that would have been more helpful, but are empty in the test set, so they cannot be used.  The nature of the mistakes to analyze have mostly to do with the amplitude, maximum and minimum positions of different body parts.  To this regard, predictors of amplitude, minimum, maximum and standard deviation showed much clearer patterns.  
+
+The other problem with the test set is that we are asked to predict the mistake with a single instantaneous measures.  The instantaneous position of the hip in the hip forward mistake will appear normal once per cycle, as shown in the figure X.  If the measurement of the test set is part of the hip forward mistake but taken at a moment where the hip are in their normal position (or acceleration), the measurement will look indistinguishable from the other mistakes. 
+
+The method of detection available in this project is therefore not very reliable, and leaves lots of room for chance, unless the test set has been carefully selected.  
+
+# Model
+The following measurements have been selected as predictors:
+
+* accel_arm (x, y and z)
+* accel_belt (x, y and z)
+* gyros_arm (x, y and z)
+* gyros_belt (x, y and z)
+* magnet_arm (x, y and z)
+* magnet_belt (x, y and z)
+* pitch, roll and yaw of arm, bult and dumbbell
+
+For each participant, a tree model is fitted using the 'rpart' training method.  For cross-validation, the training set is divided in 10.  A model is created with 9 of the 10 folds and its out of sample accuracy is estimated by predicting the class of the 10th fold.  This process is repeated 9 times.  The minimum and the maximum of these out of sample accuracy is reported for each participant.  
+
+```{r}
+to_keep = c('accel_arm_x', 
+            'accel_arm_y', 
+            'accel_arm_z', 
+            'accel_belt_x', 
+            'accel_belt_y', 
+            'accel_belt_z', 
+            'gyros_arm_x', 
+            'gyros_arm_y', 
+            'gyros_arm_z', 
+            'gyros_belt_x', 
+            'gyros_belt_y', 
+            'gyros_belt_z', 
+            'magnet_arm_x', 
+            'magnet_arm_y', 
+            'magnet_arm_z', 
+            'magnet_belt_x', 
+            'magnet_belt_y', 
+            'magnet_belt_z', 
+            'pitch_arm', 
+            'pitch_belt', 
+            'pitch_dumbbell', 
+            'roll_arm', 
+            'roll_belt', 
+            'roll_dumbbell', 
+            'yaw_arm', 
+            'yaw_belt', 
+            'yaw_dumbbell', 
+            'classe')
+for_table = data.frame()
+for (participant in unique(training[,'user_name'])) {
+  training_subset = filter(training, user_name == participant)
+  training_subset = training_subset[, to_keep]
+  folds <- createFolds(y=training_subset$classe, k=10)
+  model <- train(classe ~ ., method = 'rpart', data = training_subset)
+  p = predict(model, training_subset)
+  conf = confusionMatrix(p, training_subset[,'classe'])
+  in_training_accuracy = conf$overall[1]
+  min_acc = 1.
+  max_acc = 0.
+  for (fold in folds) {
+    local_test = training_subset[fold,]
+    local_train = training_subset[-fold,]
+    model <- train(classe ~ ., method = 'rpart', data = local_train)
+    p = predict(model, local_train)
+    conf = confusionMatrix(p, local_train[,'classe'])
+    if (conf$overall[1] > max_acc){max_acc = conf$overall[1]}
+    if (conf$overall[1] < min_acc){min_acc = conf$overall[1]}
+  }
+  d = data.frame(list('participant' = participant, 
+                      'inTrainAccuracy' = in_training_accuracy, 
+                      'minOutTrainAccuracy' = min_acc, 
+                      'maxOutTrainAccuracy' = max_acc))
+  for_table = rbind(for_table, d)
+}
+rownames(for_table) <- 1:nrow(for_table)
+for_table
+```

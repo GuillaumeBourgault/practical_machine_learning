@@ -205,7 +205,15 @@ for (participant in unique(training[,'user_name'])) {
   for_table = rbind(for_table, d)
 }</code></pre>
 <pre><code>## Loading required package: rpart</code></pre>
-<pre class="r"><code>rownames(for_table) &lt;- 1:nrow(for_table)</code></pre>
+<pre class="r"><code>rownames(for_table) &lt;- 1:nrow(for_table)
+for_table</code></pre>
+<pre><code>##   participant inTrainAccuracy minOutTrainAccuracy maxOutTrainAccuracy
+## 1    carlitos       0.6401028           0.6371429           0.6426276
+## 2       pedro       0.5582375           0.5549404           0.5610898
+## 3      adelmo       0.6937307           0.6912311           0.6951185
+## 4     charles       0.6052036           0.6046512           0.6060987
+## 5      eurico       0.6384365           0.6349493           0.6409700
+## 6      jeremy       0.6972369           0.5752530           0.7023848</code></pre>
 </div>
 
 
